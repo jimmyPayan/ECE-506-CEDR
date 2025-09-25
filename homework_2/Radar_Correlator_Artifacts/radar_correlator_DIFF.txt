@@ -1,0 +1,5 @@
+1c1
+< Radar correlator complete; lag Value is: -0.037000
+---
+> Radar correlator complete; lag Value is: 0.256000
+
