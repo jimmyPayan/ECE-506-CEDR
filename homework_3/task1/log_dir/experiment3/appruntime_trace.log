@@ -1,0 +1,5 @@
+app_id: 4, app_name: TX_api-aarch64, ref_arrival_time: 2430540080806271, ref_start_time: 2430540081969821, ref_end_time: 2430540592442194, app_runtime: 510472373, app_lifetime: 511635923 
+app_id: 0, app_name: pulse_doppler_api-aarch64, ref_arrival_time: 2430540090340243, ref_start_time: 2430540090844933, ref_end_time: 2430541261673841, app_runtime: 1170828908, app_lifetime: 1171333598 
+app_id: 2, app_name: pulse_doppler_api-aarch64, ref_arrival_time: 2430540110647126, ref_start_time: 2430540110712946, ref_end_time: 2430541271721953, app_runtime: 1161009007, app_lifetime: 1161074827 
+app_id: 1, app_name: pulse_doppler_api-aarch64, ref_arrival_time: 2430540100396694, ref_start_time: 2430540100558994, ref_end_time: 2430541280269044, app_runtime: 1179710050, app_lifetime: 1179872350 
+app_id: 3, app_name: pulse_doppler_api-aarch64, ref_arrival_time: 2430540120612438, ref_start_time: 2430540120723348, ref_end_time: 2430541291207376, app_runtime: 1170484028, app_lifetime: 1170594938 
