@@ -121,7 +121,45 @@ int scheduleSimple(ConfigManager &cedr_config, std::deque<task_nodes *> &ready_q
   }
   return tasks_scheduled;
 }
+/*
+//Start of FSFS scheduler functionality 
+//Inline helper function get start_time
+static inline unsigned long long getAppStartTime(const task_nodes* t) {
+    if (!t || !t->app_pnt) return ULLONG_MAX;
 
+    const auto start = static_cast<unsigned long long>(t->app_pnt->start_time);
+    if (start) return start;
+
+    const auto arrival = static_cast<unsigned long long>(t->app_pnt->arrival_time);
+    return arrival ? arrival : ULLONG_MAX;
+}
+
+//FSFS Scheduler Implementation
+
+int scheduleFSFS(ConfigManager &cedr_config, std:: deque<task_nodes *> &ready_queue, worker_thread *hardware_thread_handle, pthread_mutex_t *resource_mutex, 
+                 uint32_t &free_resource_count) {
+static unsigned int rand_resources = 0;
+unsigned int tasks_scheduled = 0;
+unsigned int total_resources = cedr_config.getTotalResources();
+
+// Check for "FSFS" string
+if (cedr_config.getScheduler() != std::string("FSFS")) { 
+	return 0;
+}
+if (total_resources == 0 || ready_queue ()) 
+	return 0;
+while(!ready_queue.empty()) {
+	auto best_it = ready_queue.end();
+	unsigned long long best_t0 = ULLONG_MAX;
+
+	for (auto it = ready_queue.begin(); it != ready_queue.end(); ++it) {
+            const unsigned long long t0 = getAppStartTime(*it);  // Find earliest start
+            if (t0 < best_t0) {
+                best_t0 = t0;
+                best_it = it;
+            }
+}
+*/
 
 int scheduleRandom(ConfigManager &cedr_config, std::deque<task_nodes *> &ready_queue, worker_thread *hardware_thread_handle, pthread_mutex_t *resource_mutex,
                    uint32_t &free_resource_count) {
