@@ -367,8 +367,6 @@ int scheduleEFT(ConfigManager &cedr_config, std::deque<task_nodes *> &ready_queu
             avail_time = hardware_thread_handle[i].thread_avail_time; // Based on estimated execution times of the tasks in the `todo_queue` of the PE
             task_exec_time = cedr_config.getDashExecTime((*itr)->task_type, resourceType); // Estimated execution time of the task
 
-            std::cout << "START TIME" << (*itr)->app_pnt->start_time << std::endl;
-
             auto finishTime = (curr_time >= avail_time) ? curr_time + task_exec_time : avail_time + task_exec_time; // estimated finish time of the task on the PE at i^th index
             auto resourceIsSupported = ((*itr)->supported_resources[(uint8_t) resourceType]); // Check if the current PE support execution of this task
             /* Check if the PE supports the task and if the estimated finish time is earlier than what is found so far */
@@ -413,7 +411,7 @@ int scheduleFSFS(ConfigManager &cedr_config, std::deque<task_nodes *> &ready_que
     for (auto itr = ready_queue.begin(); itr != ready_queue.end();) {
 
         if ((*itr)->app_pnt->start_time < (*itrToQueue)->app_pnt->start_time) {
-            *itrToQueue = *itr;
+            itrToQueue = itr;
         }
         std::cout << "START TIME" << (*itrToQueue)->app_pnt->start_time << std::endl;
 
@@ -427,7 +425,7 @@ int scheduleFSFS(ConfigManager &cedr_config, std::deque<task_nodes *> &ready_que
                 );
         if (task_allocated) { // If task allocated successfully
             tasks_scheduled++; // Increment the number of scheduled tasks
-            itr = ready_queue.erase(itr); // Remove the task from ready_queue
+            itrToQueue = ready_queue.erase(itrToQueue); // Remove the task from ready_queue
             /* If queueing is disabled, decrement free resource count*/
             if (!cedr_config.getEnableQueueing()) {
                 free_resource_count--;
