@@ -4,6 +4,7 @@
 #include <climits>
 #include <map>
 #include <random>
+#include <iostream>
 
 std::map<std::string, int> schedule_cache;
 NN_DATA_ML_SCHED nn_data;
@@ -41,15 +42,14 @@ bool attemptToAssignTaskToPE(ConfigManager &cedr_config, task_nodes *task, worke
   task->assigned_resource_name = thread_handle->resource_name;
   task->actual_run_func = task->run_funcs[(uint8_t) thread_handle->thread_resource_type];
 
-  if (cedr_config.getScheduler() == "EFT" || cedr_config.getScheduler() == "ETF" || cedr_config.getScheduler() == "HEFT_RT") {
-    struct timespec curr_timespec {};
-    clock_gettime(CLOCK_MONOTONIC_RAW, &curr_timespec);
-    long long curr_time = curr_timespec.tv_nsec + curr_timespec.tv_sec * SEC2NANOSEC;
-    const long long task_exec_ns = cedr_config.getDashExecTime(task->task_type, thread_handle->thread_resource_type);
-    const auto avail_time = thread_handle->thread_avail_time;
-    thread_handle->thread_avail_time = (curr_time >= avail_time) ? curr_time + task_exec_ns : avail_time + task_exec_ns;
-  }
-
+  struct timespec curr_timespec {};
+  clock_gettime(CLOCK_MONOTONIC_RAW, &curr_timespec);
+  long long curr_time = curr_timespec.tv_nsec + curr_timespec.tv_sec * SEC2NANOSEC;
+  task->task_sched_time = curr_time;
+  const long long task_exec_ns = cedr_config.getDashExecTime(task->task_type, thread_handle->thread_resource_type);
+  const auto avail_time = thread_handle->thread_avail_time;
+  thread_handle->thread_avail_time = (curr_time >= avail_time) ? curr_time + task_exec_ns : avail_time + task_exec_ns;
+  
   // Queuing vs. Non-queuing
   pthread_mutex_lock(resource_mutex);
   thread_handle->todo_task_dequeue.push_back(task);
@@ -121,45 +121,7 @@ int scheduleSimple(ConfigManager &cedr_config, std::deque<task_nodes *> &ready_q
   }
   return tasks_scheduled;
 }
-/*
-//Start of FSFS scheduler functionality 
-//Inline helper function get start_time
-static inline unsigned long long getAppStartTime(const task_nodes* t) {
-    if (!t || !t->app_pnt) return ULLONG_MAX;
 
-    const auto start = static_cast<unsigned long long>(t->app_pnt->start_time);
-    if (start) return start;
-
-    const auto arrival = static_cast<unsigned long long>(t->app_pnt->arrival_time);
-    return arrival ? arrival : ULLONG_MAX;
-}
-
-//FSFS Scheduler Implementation
-
-int scheduleFSFS(ConfigManager &cedr_config, std:: deque<task_nodes *> &ready_queue, worker_thread *hardware_thread_handle, pthread_mutex_t *resource_mutex, 
-                 uint32_t &free_resource_count) {
-static unsigned int rand_resources = 0;
-unsigned int tasks_scheduled = 0;
-unsigned int total_resources = cedr_config.getTotalResources();
-
-// Check for "FSFS" string
-if (cedr_config.getScheduler() != std::string("FSFS")) { 
-	return 0;
-}
-if (total_resources == 0 || ready_queue ()) 
-	return 0;
-while(!ready_queue.empty()) {
-	auto best_it = ready_queue.end();
-	unsigned long long best_t0 = ULLONG_MAX;
-
-	for (auto it = ready_queue.begin(); it != ready_queue.end(); ++it) {
-            const unsigned long long t0 = getAppStartTime(*it);  // Find earliest start
-            if (t0 < best_t0) {
-                best_t0 = t0;
-                best_it = it;
-            }
-}
-*/
 
 int scheduleRandom(ConfigManager &cedr_config, std::deque<task_nodes *> &ready_queue, worker_thread *hardware_thread_handle, pthread_mutex_t *resource_mutex,
                    uint32_t &free_resource_count) {
@@ -379,70 +341,116 @@ int scheduleRT(ConfigManager &cedr_config, std::deque<task_nodes *> &ready_queue
   return tasks_scheduled;
 }
 */
-int scheduleEFT(ConfigManager &cedr_config, std::deque<task_nodes *> &ready_queue, worker_thread *hardware_thread_handle, pthread_mutex_t *resource_mutex,
-                uint32_t &free_resource_count) {
+int scheduleEFT(ConfigManager &cedr_config, std::deque<task_nodes *> &ready_queue, worker_thread *hardware_thread_handle, pthread_mutex_t *resource_mutex, uint32_t &free_resource_count)
+{
+    unsigned int tasks_scheduled = 0; // Number of tasks scheduled so far
+    int eft_resource = 0; // ID of the PE that will be assigned to the task
+    unsigned long long earliest_estimated_availtime = 0; // Estimated finish time initialization
+    bool task_allocated; // Task assigned to PE successfully or not
 
-  unsigned int tasks_scheduled = 0;
-  int eft_resource = 0;
-  unsigned long long earliest_estimated_availtime = 0;
-  bool task_allocated;
+    /* Get current time in nanosecond scale */
+    struct timespec curr_timespec {};
+    clock_gettime(CLOCK_MONOTONIC_RAW, &curr_timespec);
+    long long curr_time = curr_timespec.tv_nsec + curr_timespec.tv_sec * SEC2NANOSEC;
 
-  struct timespec curr_timespec {};
-  clock_gettime(CLOCK_MONOTONIC_RAW, &curr_timespec);
-  long long curr_time = curr_timespec.tv_nsec + curr_timespec.tv_sec * SEC2NANOSEC;
-  long long avail_time;
-  long long task_exec_time;
+    long long avail_time; // Current available time of the PEs
+    long long task_exec_time; // Estimated execution time of the task
 
-  unsigned int total_resources = cedr_config.getTotalResources();
+    unsigned int total_resources = cedr_config.getTotalResources(); // Total Number of PEs available
 
-  // For loop to iterate over all tasks in Ready queue
-  for (auto itr = ready_queue.begin(); itr != ready_queue.end();) {
-    earliest_estimated_availtime = ULLONG_MAX;
-    // For each task, iterate over all PE's to find the earliest finishing one
-    for (int i = total_resources - 1; i >= 0; i--) {
-      auto resourceType = hardware_thread_handle[i].thread_resource_type;
-      avail_time = hardware_thread_handle[i].thread_avail_time;
-      task_exec_time = cedr_config.getDashExecTime((*itr)->task_type, resourceType);
-      auto finishTime = (curr_time >= avail_time) ? curr_time + task_exec_time : avail_time + task_exec_time;
-      auto resourceIsSupported = ((*itr)->supported_resources[(uint8_t) resourceType]);
-      if (resourceIsSupported && finishTime < earliest_estimated_availtime) {
-        earliest_estimated_availtime = finishTime;
-        eft_resource = i;
-      }
+    // For loop to iterate over all tasks in Ready queue
+    for (auto itr = ready_queue.begin(); itr != ready_queue.end();) {
+        earliest_estimated_availtime = ULLONG_MAX;
+        // For each task, iterate over all PEs to find the earliest finishing one
+        for (int i = total_resources - 1; i >= 0; i--) {
+            auto resourceType = hardware_thread_handle[i].thread_resource_type; // FFT, ZIP, GEMM, etc.
+            avail_time = hardware_thread_handle[i].thread_avail_time; // Based on estimated execution times of the tasks in the `todo_queue` of the PE
+            task_exec_time = cedr_config.getDashExecTime((*itr)->task_type, resourceType); // Estimated execution time of the task
+
+            std::cout << "START TIME" << (*itr)->app_pnt->start_time << std::endl;
+
+            auto finishTime = (curr_time >= avail_time) ? curr_time + task_exec_time : avail_time + task_exec_time; // estimated finish time of the task on the PE at i^th index
+            auto resourceIsSupported = ((*itr)->supported_resources[(uint8_t) resourceType]); // Check if the current PE support execution of this task
+            /* Check if the PE supports the task and if the estimated finish time is earlier than what is found so far */
+            if (resourceIsSupported && finishTime < earliest_estimated_availtime) {
+                earliest_estimated_availtime = finishTime;
+                eft_resource = i;
+            }
+        }
+        // Attempt to assign task on earliest finishing PE
+        task_allocated = attemptToAssignTaskToPE(
+                cedr_config, // Current configuration of the CEDR
+                (*itr), // Task that is being scheduled
+                &hardware_thread_handle[eft_resource], // PE that is mapped to the task based on the heuristic
+                &resource_mutex[eft_resource], // Mutex protection for the PE's todo queue
+                eft_resource // ID of the mapped PE
+                );
+        if (task_allocated) { // If task allocated successfully
+            tasks_scheduled++; // Increment the number of scheduled tasks
+            itr = ready_queue.erase(itr); // Remove the task from ready_queue
+            /* If queueing is disabled, decrement free resource count*/
+            if (!cedr_config.getEnableQueueing()) {
+                free_resource_count--;
+                if (free_resource_count == 0)
+                    break;
+            }
+        } else { // If task is not allocated successfully
+            itr++; // Go to the next task in ready_queue
+        }
     }
+    return tasks_scheduled;
+}
 
-    // Attempt to assign task on earliest finishing PE
-    task_allocated = attemptToAssignTaskToPE(cedr_config, (*itr), &hardware_thread_handle[eft_resource], &resource_mutex[eft_resource], eft_resource);
+int scheduleFSFS(ConfigManager &cedr_config, std::deque<task_nodes *> &ready_queue, worker_thread *hardware_thread_handle, pthread_mutex_t *resource_mutex, uint32_t &free_resource_count)
+{
+    unsigned int tasks_scheduled = 0; // Number of tasks scheduled so far
+    int eft_resource = 0; // ID of the PE that will be assigned to the task
+    unsigned long long earliestAppStartTime = ULLONG_MAX; // Estimated finish time initialization
+    bool task_allocated; // Task assigned to PE successfully or not
+    auto itrToQueue = ready_queue.begin(); // initialize the iterator to queue
 
-    // If task allocated successfully
-    //  1. Increment the number of scheduled tasks
-    //  2. Remove the task from ready_queue
-    // Else
-    //  1. Go to next task in ready_queue
-    if (task_allocated) {
-      tasks_scheduled++;
-      itr = ready_queue.erase(itr);
-      if (!cedr_config.getEnableQueueing()) {
-        free_resource_count--;
-        if (free_resource_count == 0)
-          break;
-      }
-    } else {
-      itr++;
+    // For loop to iterate over all tasks in Ready queue
+    for (auto itr = ready_queue.begin(); itr != ready_queue.end();) {
+
+        if ((*itr)->app_pnt->start_time < (*itrToQueue)->app_pnt->start_time) {
+            *itrToQueue = *itr;
+        }
+        std::cout << "START TIME" << (*itrToQueue)->app_pnt->start_time << std::endl;
+
+        // Attempt to assign task on earliest finishing PE
+        task_allocated = attemptToAssignTaskToPE(
+                cedr_config, // Current configuration of the CEDR
+                (*itrToQueue), // Task that is being scheduled
+                &hardware_thread_handle[eft_resource], // PE that is mapped to the task based on the heuristic
+                &resource_mutex[eft_resource], // Mutex protection for the PE's todo queue
+                eft_resource // ID of the mapped PE
+                );
+        if (task_allocated) { // If task allocated successfully
+            tasks_scheduled++; // Increment the number of scheduled tasks
+            itr = ready_queue.erase(itr); // Remove the task from ready_queue
+            /* If queueing is disabled, decrement free resource count*/
+            if (!cedr_config.getEnableQueueing()) {
+                free_resource_count--;
+                if (free_resource_count == 0)
+                    break;
+            }
+        } 
+        else { // If task is not allocated successfully
+            itr++; // Go to the next task in ready_queue
+        }
     }
-  }
-  return tasks_scheduled;
+    return tasks_scheduled;
 }
 
 int scheduleETF(ConfigManager &cedr_config, std::deque<task_nodes *> &ready_queue, worker_thread *hardware_thread_handle, pthread_mutex_t *resource_mutex,
-                uint32_t &free_resource_count) {
+        uint32_t &free_resource_count) {
 
-  unsigned int tasks_scheduled = 0;
-  int etf_resource = 0;
-  unsigned long long earliest_estimated_availtime = 0;
-  auto minTask = ready_queue.begin();
-  int ready_queue_size = ready_queue.size();
-  bool task_allocated;
+    unsigned int tasks_scheduled = 0;
+    int etf_resource = 0;
+    unsigned long long earliest_estimated_availtime = 0;
+    auto minTask = ready_queue.begin();
+    int ready_queue_size = ready_queue.size();
+    bool task_allocated;
 
   struct timespec curr_timespec {};
   clock_gettime(CLOCK_MONOTONIC_RAW, &curr_timespec);
@@ -505,7 +513,7 @@ void performScheduling(ConfigManager &cedr_config, std::deque<task_nodes *> &rea
     printf("empty queue");
 	return;
   }
-  LOG_DEBUG << "Ready queue non-empty, performing task scheduling";
+  LOG_DEBUG << "Ready queue non-empty, performing task scheduling using " << sched_policy << " scheduler.";
   //tasks_scheduled += scheduleSimple(cedr_config, ready_queue, hardware_thread_handle, resource_mutex, free_resource_count);
   // Begin by scheduling all cached tasks if requested
   /*if (cedr_config.getCacheSchedules()) {
@@ -520,12 +528,10 @@ void performScheduling(ConfigManager &cedr_config, std::deque<task_nodes *> &rea
     tasks_scheduled += scheduleMET(cedr_config, ready_queue, hardware_thread_handle, resource_mutex, free_resource_count);
   } else if (sched_policy == "HEFT_RT") {
     tasks_scheduled += scheduleHEFT_RT(cedr_config, ready_queue, hardware_thread_handle, resource_mutex, free_resource_count);
-  }/* else if (sched_policy == "DNN") {
-    tasks_scheduled += scheduleDNN(cedr_config, ready_queue, hardware_thread_handle, resource_mutex, free_resource_count);
-  } else if (sched_policy == "RT") {
-    tasks_scheduled += scheduleRT(cedr_config, ready_queue, hardware_thread_handle, resource_mutex, free_resource_count);
-  }*/ else if (sched_policy == "EFT") {
+  } else if (sched_policy == "EFT") {
     tasks_scheduled += scheduleEFT(cedr_config, ready_queue, hardware_thread_handle, resource_mutex, free_resource_count);
+  } else if (sched_policy == "FSFS") {
+    tasks_scheduled += scheduleFSFS(cedr_config, ready_queue, hardware_thread_handle, resource_mutex, free_resource_count);
   } else if (sched_policy == "ETF") {
     tasks_scheduled += scheduleETF(cedr_config, ready_queue, hardware_thread_handle, resource_mutex, free_resource_count);
   } else {
@@ -538,4 +544,5 @@ void performScheduling(ConfigManager &cedr_config, std::deque<task_nodes *> &rea
   } else {
     LOG_DEBUG << "Scheduled " << tasks_scheduled << " tasks. There are now " << free_resource_count << " free resources";
   }
+  std::cout << "****** PERFORMED SCHEDULING ******" << std::endl;
 }
