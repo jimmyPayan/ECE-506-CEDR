@@ -1,0 +1,2 @@
+app_id: 1, app_name: SAR_api-aarch64, ref_arrival_time: 1799439147402681, ref_start_time: 1799439147447141, ref_end_time: 1799442211392484, app_runtime: 3063945343, app_lifetime: 3063989803 
+app_id: 0, app_name: SAR_api-aarch64, ref_arrival_time: 1799439142830710, ref_start_time: 1799439147200541, ref_end_time: 1799442211599694, app_runtime: 3064399153, app_lifetime: 3068768984 
